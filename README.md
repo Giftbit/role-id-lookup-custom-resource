@@ -7,3 +7,7 @@ This is useful for restricting access to roles in Resource Based Access Policies
 ## Requirements
 
 Node 10.x
+
+## Building
+
+`zip role-id-lookup.zip index.js`
