@@ -3,12 +3,12 @@ var aws = require("aws-sdk");
 /**
  * A Simple Lambda to look up the User ID of a Role
  **/
-exports.handler = function(event, context) {
+exports.handler = async function(event, context) {
 
     console.log("REQUEST RECEIVED:\n" + JSON.stringify(event));
 
     // For Delete requests, immediately send a SUCCESS response.
-    if (event.RequestType == "Delete") {
+    if (event.RequestType === "Delete") {
         sendResponse(event, context, "SUCCESS", event.PhysicalResourceId);
         return;
     }
@@ -23,7 +23,7 @@ exports.handler = function(event, context) {
     var hasErrored = false;
     var results = [];
 
-    roleNames.forEach(function (roleName, ix) {
+    roleNames.forEach((roleName, ix) => {
         iam.getRole({
             RoleName: roleName
         }, function(err, getRoleResult) {
