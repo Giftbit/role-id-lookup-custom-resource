@@ -2,7 +2,7 @@ var aws = require("aws-sdk");
 
 /**
  * A Simple Lambda to look up the User ID of a Role
- **/
+ */
 exports.handler = async function(event, context) {
 
     console.log("REQUEST RECEIVED:\n" + JSON.stringify(event));
@@ -13,48 +13,36 @@ exports.handler = async function(event, context) {
         return;
     }
 
-    var roleNames = (event.ResourceProperties.RoleNames || "")
+    const roleNames = (event.ResourceProperties.RoleNames || "")
         .split(",")
         .concat(event.ResourceProperties.RoleName)
-        .map(function (r) { return r ? r.trim() : r; })
-        .filter(function (r) { return r; });
+        .map(r => r ? r.trim() : r)
+        .filter(r => !!r);
 
-    var iam = new aws.IAM();
-    var hasErrored = false;
-    var results = [];
-
-    roleNames.forEach((roleName, ix) => {
+    const iam = new aws.IAM();
+    const resultPromises = roleNames.map(roleName => new Promise((resolve, reject) => {
         iam.getRole({
             RoleName: roleName
-        }, function(err, getRoleResult) {
-            if (hasErrored) {
-                return;
-            }
-
+        }, function (err, getRoleResult) {
             if (err) {
-                hasErrored = true;
-                var responseData = {Error: "Failed to retrieve the Role with Role Name: " + roleName}
-                console.log(responseData.Error + ":\n", err);
-                sendResponse(event, context, "FAILED", context.logStreamName);
+                reject(err);
             } else {
-                results[ix] = getRoleResult.Role.RoleId;
-
-                // Check if we've got all results.
-                for (var i=0; i < roleNames.length; i++) {
-                    if (!results[i]) {
-                        // We don't.
-                        return;
-                    }
-                }
-
-                if (event.ResourceProperties.AsGrant !== false && event.ResourceProperties.AsGrant !== "false") {
-                    results = results.map(function (r) { return r + ":*" });
-                }
-
-                sendResponse(event, context, "SUCCESS", results.join(","));
+                resolve(getRoleResult.Role.RoleId);
             }
         });
-    });
+    }));
+
+    try {
+        let results = await Promise.all(resultPromises);
+        if (event.ResourceProperties.AsGrant !== false && event.ResourceProperties.AsGrant !== "false") {
+            results = results.map(r => r + ":*");
+        }
+        sendResponse(event, context, "SUCCESS", results.join(","));
+    } catch (err) {
+        var responseData = {Error: "Failed to retrieve the Role with Role Name: " + roleName};
+        console.log(responseData.Error + ":\n", err);
+        sendResponse(event, context, "FAILED", context.logStreamName);
+    }
 };
 
 // Send response to the pre-signed S3 URL
@@ -72,11 +60,11 @@ function sendResponse(event, context, responseStatus, physicalResourceId) {
 
     console.log("RESPONSE BODY:\n", responseBody);
 
-    var https = require("https");
-    var url = require("url");
+    const https = require("https");
+    const url = require("url");
 
-    var parsedUrl = url.parse(event.ResponseURL);
-    var options = {
+    const parsedUrl = url.parse(event.ResponseURL);
+    const options = {
         hostname: parsedUrl.hostname,
         port: 443,
         path: parsedUrl.path,
@@ -89,20 +77,22 @@ function sendResponse(event, context, responseStatus, physicalResourceId) {
 
     console.log("SENDING RESPONSE...\n");
 
-    var request = https.request(options, function(response) {
-        console.log("STATUS: " + response.statusCode);
-        console.log("HEADERS: " + JSON.stringify(response.headers));
-        // Tell AWS Lambda that the function execution is done
-        context.done();
-    });
+    return new Promise((resolve, reject) => {
+        const request = https.request(options, function(response) {
+            console.log("STATUS: " + response.statusCode);
+            console.log("HEADERS: " + JSON.stringify(response.headers));
+            // Tell AWS Lambda that the function execution is done
+            resolve();
+        });
 
-    request.on("error", function(error) {
-        console.log("sendResponse Error:" + error);
-        // Tell AWS Lambda that the function execution is done
-        context.done();
-    });
+        request.on("error", function(error) {
+            console.log("sendResponse Error:" + error);
+            // Tell AWS Lambda that the function execution is done
+            reject(error);
+        });
 
-    // write data to request body
-    request.write(responseBody);
-    request.end();
+        // write data to request body
+        request.write(responseBody);
+        request.end();
+    });
 }
